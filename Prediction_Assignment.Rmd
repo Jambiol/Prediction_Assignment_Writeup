@@ -1,0 +1,129 @@
+---
+title: " Prediction Assignment Writeup"
+author: "Jordi Carrère Molina"
+date: '`r format(Sys.Date(),"%e de %B, %Y")`'
+output:
+  html_document:
+    toc: true
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = NULL, cache = TRUE, warning = FALSE)
+```
+#Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+Data
+
+The training data for this project are available here:
+        https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+        https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+#Loading and cleaning data
+
+##Importing data
+
+Data was downloaded from the above URLs and the two .csv files werw loaded to R objects, `train` and `test`
+```{r}
+workingDir <- getwd()
+
+dataDir <- paste(workingDir,"/data", sep='')
+if(!(dir.exists(dataDir))){
+        dir.create(dataDir)
+}
+
+url1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+destfile1 <- paste(dataDir,"/pml-training.csv", sep='')
+if(!(file.exists("data/pml-training.csv"))){
+        download.file(url1, destfile1)
+}
+
+url2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+destfile2 <- paste(dataDir,"/pml-testing.csv", sep='')
+if(!(file.exists("data/pml-testing.csv"))){
+        download.file(url2, destfile2)
+}
+
+training <- read.csv("data/pml-training.csv", row.names = 1, na.strings=c("NA", "#DIV/0!"))
+testing <- read.csv("data/pml-testing.csv", row.names = 1, na.strings=c("NA", "#DIV/0!"))
+```
+
+##Exploring data
+
+A simple view of the data shows that there's a lot of variables full of NAs. Data was cleaned in the next step to reduce dimensionality.
+```{r}
+str(training, list.len=15, vec.len=2)
+```
+
+##Cleaning data
+
+Variables with at least one NA were removed from the analysis. Also, the first seven variables were removed since they are identification variables. The `training` set was splitted in two subsets: `train` (training + validation) and `test`.
+```{r}
+dim(training)
+train_cl <- training[, apply(training, 2, function(x) !any(is.na(x)))]
+train_cl <- train_cl[,-c(1:7)]
+dim(train_cl)
+
+set.seed(12345)
+inTrain <- createDataPartition(y=train_cl$classe, p=0.75, list=F)
+train <- train_cl[inTrain,] 
+test <- train_cl[-inTrain,] 
+dim(train)
+dim(test)
+```
+
+The `testing` set was cleaned too, and renamed, since this set wasn't used for testing, but predict new data.
+```{r}
+vars <- names(train_cl)
+newdata <- testing[,names(testing) %in% vars]
+dim(newdata)
+```
+
+#Trainning model: Random Forest
+
+Random Forests generate several decision trees from a selected number of randomly chosen characters so that the trees do not contain all the variables of our data, but each variable is present in several trees in the forest. After generating the set of trees (forest), the model uses the vote of each tree to predict a new example. The parameters of the function `rf` allow to modify are:
+```{r, results = 'hide'}
+require(caret)
+```
+
+```{r}
+modelLookup("rf")
+```
+
+Model was trained using a 3-fold crossvalidation and using 5 values of `mtry`.
+```{r, results = 'hide'}
+set.seed(12345)
+trControl <- trainControl(method="cv", number=3, verboseIter=FALSE)
+rf_model <- train(classe ~ ., data=train_cl, method="rf", tuneLength = 5,
+                          trControl=trControl)
+```
+
+```{r}
+rf_model
+```
+
+In the next grafic we can see the accuracy of the models by `mtry` value.
+```{r, fig.align = "center", fig.height=3, fig.width=5}
+plot(rf_model)
+```
+
+The best model is the model with mtry = `r rf_model$bestTune`. As this model was selected by the validation set, evaluating the performance of this model with a testing set was needed.
+```{r}
+set.seed(12345)
+pred <- predict(rf_model, test)
+(confMat_rf <- confusionMatrix(pred, test$classe))
+```
+The model has an accuracy of `r round(confMat_rf$overall["Accuracy"], 4)*100`% and $\kappa$ = `r round(confMat_rf$overall["Kappa"], 4)`.
+
+# Predictions
+
+Once the model was trained and evaluated, we can do predictions of new data.
+```{r}
+preds <- predict(rf_model, newdata=newdata)
+preds
+```
+
+This predictions were used to answer _Course Project Prediction Quiz_.
